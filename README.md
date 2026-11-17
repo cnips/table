@@ -45,7 +45,7 @@ func main() {
         log.Fatal(err)
     }
 
-    // Bulk insert (max 20 rows per request)
+    // Bulk insert (max 100 rows per request, enforced by table-srv)
     if err := accessor.BulkInsert(ctx, tableID, []User{
         {Name: "Alan", Email: "alan@example.com", Age: 41},
         {Name: "Grace", Email: "grace@example.com", Age: 85},
@@ -85,7 +85,7 @@ func main() {
         log.Fatal(err)
     }
 
-    // Delete specific rows by their IDs (max 100 IDs per request)
+    // Delete specific rows by their IDs (max 100 IDs per request, enforced by table-srv)
     if err := accessor.DeleteByIds(ctx, tableID, []string{
         "row-id-1", "row-id-2",
     }); err != nil {
@@ -117,7 +117,7 @@ accessor := table.NewCnipsTableAccessorWithConfig[User](
 | Method                                                             | Description                                                |
 | ------------------------------------------------------------------ | ---------------------------------------------------------- |
 | `Insert(ctx, tableId, *T) error`                                   | Insert a single row.                                       |
-| `BulkInsert(ctx, tableId, []T) error`                              | Insert multiple rows (max 20 per request).                 |
+| `BulkInsert(ctx, tableId, []T) error`                              | Insert multiple rows (max 100 per request).                 |
 | `Find(ctx, tableId, query, ...FindOptions) ([]T, error)`           | Search rows matching the filter map.                       |
 | `Count(ctx, tableId, query) (int, error)`                          | Get total number of rows matching the filter.              |
 | `Update(ctx, tableId, query, *T) ([]T, error)`                     | Update rows matching the filter; returns the updated rows. |
@@ -128,12 +128,15 @@ The `query` map is sent to cnips as `{"filters": <query>}` and follows the cnips
 
 ### Limits
 
+Limits are enforced by table-srv; the SDK forwards requests unchanged and returns the server's error if one is exceeded.
+
 | Limit                              | Value   |
 | ---------------------------------- | ------- |
-| Max rows per insert/bulk-update    | **20**  |
+| Max rows per insert/bulk-update    | **100** |
 | Max row IDs per bulk delete        | **100** |
-| Max page size (find)               | **20**  |
+| Max page size (find)               | **100** |
 | Max row size                       | **1 MB**|
+| Filter delete above 10,000 rows    | runs asynchronously (202 Accepted) |
 
 ### Pagination (FindOptions)
 
@@ -141,12 +144,12 @@ You can pass an optional `FindOptions` struct to control pagination:
 
 ```go
 type FindOptions struct {
-    Size int // Rows per page (1–20). Server default: 10.
+    Size int // Rows per page (1–100). Server default: 20.
     Page int // Zero-based page index. Server default: 0.
 }
 ```
 
-> **Note:** Without `FindOptions`, the server returns at most **10 rows** (the default page size). The maximum allowed size is **20**.
+> **Note:** Without `FindOptions`, the server returns at most **20 rows** (the default page size). Sizes above **100** are capped to 100 by the server.
 
 Use `Count` to get the total number of matching rows, then paginate with `Find`:
 

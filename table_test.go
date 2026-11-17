@@ -357,18 +357,22 @@ func TestBulkInsert(t *testing.T) {
 		}
 	})
 
-	t.Run("ExceedsMaxRows", func(t *testing.T) {
-		accessor := NewCnipsTableAccessor[TestData]("https://example.com", "api-key")
-		data := make([]TestData, MaxRowsPerRequest+1)
-		for i := range data {
-			data[i] = TestData{ID: i, Name: fmt.Sprintf("test%d", i)}
+	t.Run("NoClientSideRowLimit", func(t *testing.T) {
+		var got int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var data []TestData
+			_ = json.NewDecoder(r.Body).Decode(&data)
+			got = len(data)
+			w.WriteHeader(http.StatusCreated)
+		}))
+		defer server.Close()
+		accessor := NewCnipsTableAccessor[TestData](server.URL, "api-key")
+		data := make([]TestData, 150)
+		if err := accessor.BulkInsert(context.Background(), "table1", data); err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-		err := accessor.BulkInsert(context.Background(), "table1", data)
-		if err == nil {
-			t.Fatal("expected error for exceeding max rows")
-		}
-		if !strings.Contains(err.Error(), "limited to") {
-			t.Errorf("unexpected error message: %v", err)
+		if got != 150 {
+			t.Errorf("expected 150 rows forwarded, got %d", got)
 		}
 	})
 
@@ -1024,18 +1028,34 @@ func TestDeleteByIds(t *testing.T) {
 		}
 	})
 
-	t.Run("ExceedsMaxIds", func(t *testing.T) {
-		accessor := NewCnipsTableAccessor[TestData]("https://example.com", "api-key")
-		ids := make([]string, MaxDeleteIDs+1)
-		for i := range ids {
-			ids[i] = fmt.Sprintf("id-%d", i)
+	t.Run("NoClientSideIdLimit", func(t *testing.T) {
+		var got int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				RowIDs []string `json:"rowIds"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			got = len(body.RowIDs)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+		accessor := NewCnipsTableAccessor[TestData](server.URL, "api-key")
+		if err := accessor.DeleteByIds(context.Background(), "table1", make([]string, 150)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-		err := accessor.DeleteByIds(context.Background(), "table1", ids)
-		if err == nil {
-			t.Fatal("expected error for exceeding max IDs")
+		if got != 150 {
+			t.Errorf("expected 150 ids forwarded, got %d", got)
 		}
-		if !strings.Contains(err.Error(), "limited to") {
-			t.Errorf("unexpected error message: %v", err)
+	})
+
+	t.Run("AsyncDeleteAccepted", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+		}))
+		defer server.Close()
+		accessor := NewCnipsTableAccessor[TestData](server.URL, "api-key")
+		if err := accessor.Delete(context.Background(), "table1", map[string]any{"a": 1}); err != nil {
+			t.Fatalf("202 should be success, got: %v", err)
 		}
 	})
 
